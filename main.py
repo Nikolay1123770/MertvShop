@@ -1,4 +1,4 @@
-# mëpтв 🥀 | Декабрьский снег ♡ | STABLE FOREVER EDITION
+# mëpтв 🥀 | Декабрьский снег ♡ | DEBUG EDITION
 import logging
 import uuid
 import json
@@ -18,12 +18,12 @@ from telegram.ext import (
 from yoomoney import Client, Quickpay
 from aiohttp import web
 
-# Настройка логирования (убираем лишний шум от библиотек)
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-# Отключаем лишние логи от библиотек, оставляем только ошибки
+# Оставляем httpx в WARNING, чтобы не спамил
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -125,6 +125,7 @@ async def api_create_order(request):
         return web.json_response({'status': 'error'}, status=500)
 
 async def api_check_payment(request):
+    """УСИЛЕННАЯ ПРОВЕРКА С ЛОГАМИ"""
     order_id = request.query.get('order_id')
     order_data = active_orders.get(order_id)
     
@@ -132,27 +133,36 @@ async def api_check_payment(request):
         return web.json_response({'paid': False, 'error': 'Order not found'})
 
     try:
-        history = ym_client.operation_history(records=30)
+        # Запрашиваем последние 10 операций
+        history = ym_client.operation_history(records=10)
         is_paid = False
         
-        logger.info(f"🔍 Checking order: {order_id}")
+        logger.info(f"🔍 ИЩЕМ ЗАКАЗ: {order_id}")
+        logger.info(f"--- НАЧАЛО ИСТОРИИ ({len(history.operations)} шт) ---")
         
         for op in history.operations:
+            # Выводим в консоль каждую операцию для проверки
+            label_info = op.label if op.label else "НЕТ МЕТКИ"
+            logger.info(f"💰 {op.amount}₽ | Label: {label_info} | Status: {op.status}")
+            
             if op.label == order_id and op.status == "success":
                 if op.amount >= order_data['amount']:
                     is_paid = True
-                    break
+                    # Не делаем break, чтобы досмотреть историю в логах до конца (для отладки)
+        
+        logger.info("--- КОНЕЦ ИСТОРИИ ---")
         
         if is_paid:
-            logger.info(f"✅ Order paid: {order_id}")
+            logger.info(f"✅ УСПЕХ! Оплата найдена.")
             await notify_admin_success(order_id, order_data)
             del active_orders[order_id]
             return web.json_response({'paid': True})
         else:
+            logger.info(f"❌ Не найдено.")
             return web.json_response({'paid': False})
         
     except Exception as e:
-        logger.error(f"Check Error: {e}")
+        logger.error(f"CHECK ERROR: {e}")
         return web.json_response({'paid': False})
 
 bot_app = None 
@@ -189,7 +199,7 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("Админ: @slayip")
 
-# ================= ЗАПУСК (ИСПРАВЛЕНО) =================
+# ================= ЗАПУСК =================
 
 async def main():
     global bot_app
@@ -202,7 +212,6 @@ async def main():
     await bot_app.initialize()
     await bot_app.start()
     
-    # Важно: drop_pending_updates=True удалит старые зависшие команды, которые могут крашить бота
     await bot_app.updater.start_polling(drop_pending_updates=True)
     print("🤖 Бот запущен (Polling)...")
 
@@ -215,17 +224,16 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Получаем порт от хостинга
     port = int(os.environ.get("PORT", 3000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     
     print(f"🌍 Сайт запущен на порту {port}")
     await site.start()
 
-    # 3. БЕСКОНЕЧНЫЙ ЦИКЛ (Чтобы бот не выключался)
-    print("🚀 Все системы работают. Ухожу в режим ожидания.")
+    # 3. БЕСКОНЕЧНЫЙ ЦИКЛ
+    print("🚀 Все системы работают.")
     while True:
-        await asyncio.sleep(3600)  # Спим по часу, но процесс не закрывается
+        await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     try:
