@@ -1,8 +1,11 @@
-# mëpтв 🥀 | Декабрьский снег ♡ | Professional Edition
+# mëpтв 🥀 | Декабрьский снег ♡ | Ultimate Hybrid Edition (Buttons + WebApp)
 import logging
 import uuid
+import json
+import asyncio
+import os
 from typing import Dict, List
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,6 +15,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from yoomoney import Client, Quickpay
+from aiohttp import web
 
 # Настройка логирования
 logging.basicConfig(
@@ -21,20 +25,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= КОНФИГУРАЦИЯ =================
-TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"  # <--- ВСТАВЬ ТОКЕН БОТА
+
+TOKEN = "ВСТАВЬ_ТОКЕН_БОТА"
 ADMIN_ID = 1691654877
+YOOMONEY_TOKEN = "ВСТАВЬ_ТОКЕН_ЮМАНИ"
+YOOMONEY_WALLET = "ВСТАВЬ_НОМЕР_КОШЕЛЬКА"
 
-# Юмани настройки
-YOOMONEY_TOKEN = "86F31496F52C1B607A0D306BE0CAE639CFAFE7A45D3C88AF4E1759B22004954D"      # <--- ВСТАВЬ ТОКЕН ЮМАНИ
-YOOMONEY_WALLET = "4100118889570559"  # <--- ВСТАВЬ НОМЕР КОШЕЛЬКА
+# Ссылка на Mini App (Твой домен)
+WEB_APP_URL = "https://mertvshop.bothost.tu" 
 
-# Инициализация клиента Юмани
+# ================= ИНИЦИАЛИЗАЦИЯ =================
+
 try:
     ym_client = Client(YOOMONEY_TOKEN)
-except:
-    logger.error("Ошибка инициализации Юмани. Проверьте токен.")
+except Exception as e:
+    logger.error(f"Ошибка инициализации Юмани: {e}")
 
-# Хранение данных
 user_carts: Dict[int, List[Dict]] = {}
 user_states: Dict[int, Dict] = {}
 active_orders: Dict[str, Dict] = {}
@@ -59,470 +65,272 @@ class Product:
         TG_PREMIUM_12: "Premium 12 мес.",
     }
 
-# ================= ДИЗАЙН ИНТЕРФЕЙСА =================
+# ================= ВЕБ-СЕРВЕР (Для работы Mini App) =================
+
+async def http_handler(request):
+    try:
+        return web.FileResponse("index.html")
+    except FileNotFoundError:
+        return web.Response(text="Error 404: index.html not found", status=404)
+
+# ================= ГЛАВНОЕ МЕНЮ =================
 
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛍 Каталог товаров", callback_data='catalog')],
+        # Гибридное меню: И Web App, И обычные кнопки
+        [InlineKeyboardButton("📱 Открыть магазин (Mini App)", web_app=WebAppInfo(url=WEB_APP_URL))],
+        [InlineKeyboardButton("🛍 Каталог (Кнопками)", callback_data='catalog')],
         [InlineKeyboardButton("🛒 Корзина", callback_data='cart'), InlineKeyboardButton("👤 Профиль", callback_data='profile')],
-        [InlineKeyboardButton("👨‍💻 Поддержка / FAQ", callback_data='support')]
+        [InlineKeyboardButton("👨‍💻 Поддержка", callback_data='support')]
     ])
 
-# Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome_text = (
         f"👋 *Привет, {user.first_name}!*\n\n"
-        "💎 *MEPTB STORE* — твой надежный поставщик цифровых товаров.\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🚀 *Моментальная выдача*\n"
-        "🛡 *Безопасная сделка*\n"
-        "⭐️ *Лучший курс на рынке*\n\n"
-        "👇 *Воспользуйтесь меню для навигации:*"
+        "💎 *MEPTB STORE*\n"
+        "Выберите удобный способ покупки:\n"
+        "• Через красивое **Mini App**\n"
+        "• Или классическими **кнопками**\n\n"
+        "🚀 *Моментальная выдача*"
     )
-    
     if update.message:
         await update.message.reply_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
     else:
-        try:
-            await update.callback_query.message.edit_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
-        except:
-             await update.callback_query.message.reply_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
+        try: await update.callback_query.message.edit_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
+        except: await update.callback_query.message.reply_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
 
-# Главное меню через callback
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    welcome_text = (
-        "🏠 *Главное меню*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Выберите интересующий раздел ниже:"
-    )
-    
-    await query.message.edit_text(welcome_text, reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
+    query = update.callback_query; await query.answer()
+    await query.message.edit_text("🏠 *Главное меню*", reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
 
-# Профиль (заглушка для красоты)
-async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-    cart = user_carts.get(user.id, [])
-    
-    text = (
-        "👤 *Личный кабинет*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 ID: `{user.id}`\n"
-        f"👤 Имя: {user.first_name}\n"
-        f"📦 Товаров в корзине: *{len(cart)}*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "💎 *Статус:* `Покупатель`"
-    )
-    
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+# ================= ОБРАБОТКА WEB APP (САЙТ) =================
 
-# Каталог
+async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        data = json.loads(update.effective_message.web_app_data.data)
+    except: return
+
+    cart_items = data.get('cart', {})
+    stars_amount = data.get('stars', 0)
+    
+    if user_id not in user_carts: user_carts[user_id] = []
+    added_text = []
+
+    for p_id, count in cart_items.items():
+        if count > 0 and p_id in Product.NAMES:
+            for _ in range(count):
+                user_carts[user_id].append({'type': p_id, 'name': Product.NAMES[p_id], 'price': Product.PRICES[p_id]})
+            added_text.append(f"{Product.NAMES[p_id]}: {count} шт.")
+
+    if stars_amount > 0:
+        price = stars_amount * Product.PRICES[Product.STARS]
+        user_carts[user_id].append({'type': Product.STARS, 'name': f"Stars ⭐️ ({stars_amount} шт.)", 'price': price, 'amount': stars_amount})
+        added_text.append(f"Stars ⭐️: {stars_amount} шт.")
+
+    if not added_text:
+        await update.message.reply_text("❌ Пустой выбор.", reply_markup=get_main_menu_keyboard())
+        return
+
+    summary = "\n".join(added_text)
+    await update.message.reply_text(f"✅ *Из Mini App добавлено:*\n{summary}\n\n👇 Перейдите в корзину.", parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
+
+# ================= СТАРАЯ ЛОГИКА (КНОПКИ) =================
+
 async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    text = (
-        "🛍 *Каталог товаров*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🔥 *Популярное:*\n"
-        "• Telegram Stars — валюта для ботов и каналов.\n"
-        "• Telegram Premium — новые возможности.\n\n"
-        "👇 *Выберите категорию:*"
-    )
-
-    keyboard = [
-        [InlineKeyboardButton("⭐️ Telegram Stars (Звёзды)", callback_data='stars')],
+    query = update.callback_query; await query.answer()
+    kb = [
+        [InlineKeyboardButton("⭐️ Stars (Ввод числа)", callback_data='stars')],
         [InlineKeyboardButton("⚡️ Telegram Premium", callback_data='tg_premium')],
-        [InlineKeyboardButton("🔙 В главное меню", callback_data='back_to_menu')],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    await query.message.edit_text("🛍 *Каталог товаров*", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-# Stars - шаг 1
+# --- STARS (Ручной ввод) ---
 async def stars_step1(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
+    query = update.callback_query; await query.answer()
     user_id = query.from_user.id
     user_states[user_id] = {'step': 'stars_amount', 'message_id': query.message.message_id}
-    
-    text = (
-        "⭐️ *Покупка Stars*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "💸 Текущий курс: *1 ⭐️ = 1,6₽*\n\n"
-        "⌨️ *Введите желаемое количество звезд числом:*\n"
-        "_(Например: 50, 100, 500)_"
-    )
-    
-    await query.message.edit_text(text, parse_mode='Markdown')
+    await query.message.edit_text("⌨️ *Введите количество звезд (числом):*\nКурс: 1.6₽", parse_mode='Markdown')
 
-# Обработка ввода звезд
 async def handle_stars_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    
     if user_id not in user_states or user_states[user_id].get('step') != 'stars_amount':
-        text = update.message.text.strip().lower()
-        if text == '/start':
-            await start(update, context)
+        if update.message.text == '/start': await start(update, context)
         return
-    
     try:
         amount = int(update.message.text.strip())
-        if amount <= 0 or amount > 10000:
-            await update.message.reply_text("❌ Введите число от 1 до 10 000.")
-            return
-        
+        if amount <= 0: raise ValueError
         user_states[user_id]['amount'] = amount
-        user_states[user_id]['step'] = 'stars_confirm'
-        total_price = amount * Product.PRICES[Product.STARS]
-        
-        text = (
-            "⭐️ *Подтверждение выбора*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"📦 Количество: *{amount} Stars*\n"
-            f"💰 Стоимость: *{total_price:.2f}₽*\n\n"
-            "Добавить этот товар в корзину?"
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Да, добавить", callback_data='confirm_stars'),
-                InlineKeyboardButton("❌ Нет", callback_data='cancel_stars'),
-            ],
-            [InlineKeyboardButton("🔙 Изменить кол-во", callback_data='back_to_stars_input')]
-        ]
-        
-        # Удаляем старое сообщение для чистоты
-        try:
-            await context.bot.delete_message(chat_id=user_id, message_id=user_states[user_id]['message_id'])
-        except:
-            pass
-        
-        message = await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        user_states[user_id]['message_id'] = message.message_id
-        
-    except ValueError:
-        await update.message.reply_text("❌ Пожалуйста, отправьте только число.")
+        total = amount * Product.PRICES[Product.STARS]
+        kb = [[InlineKeyboardButton("✅ Добавить", callback_data='confirm_stars'), InlineKeyboardButton("❌ Отмена", callback_data='cancel_stars')]]
+        try: await context.bot.delete_message(chat_id=user_id, message_id=user_states[user_id]['message_id'])
+        except: pass
+        msg = await update.message.reply_text(f"Добавить {amount} Stars за {total:.2f}₽?", reply_markup=InlineKeyboardMarkup(kb))
+        user_states[user_id]['message_id'] = msg.message_id
+    except:
+        await update.message.reply_text("❌ Введите корректное число.")
 
 async def confirm_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    query = update.callback_query; await query.answer()
     user_id = query.from_user.id
-    
-    if user_id in user_states and 'amount' in user_states[user_id]:
-        amount = user_states[user_id]['amount']
-        total_price = amount * Product.PRICES[Product.STARS]
-        product = {
-            'type': Product.STARS,
-            'name': f"Stars ⭐️ ({amount} шт.)",
-            'price': total_price,
-            'amount': amount
-        }
-        if user_id not in user_carts:
-            user_carts[user_id] = []
-        user_carts[user_id].append(product)
-        
-        await query.message.edit_text(f"✅ *Успешно!*\nТовар добавлен в корзину.", parse_mode='Markdown')
-        if user_id in user_states: del user_states[user_id]
-        
-        # Небольшая пауза и возврат в меню (можно через кнопку, но так быстрее)
-        keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data='back_to_menu'), InlineKeyboardButton("🛒 К корзине", callback_data='cart')]]
-        await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
+    if user_id in user_states:
+        amt = user_states[user_id]['amount']
+        price = amt * Product.PRICES[Product.STARS]
+        if user_id not in user_carts: user_carts[user_id] = []
+        user_carts[user_id].append({'type': Product.STARS, 'name': f"Stars ({amt})", 'price': price, 'amount': amt})
+        del user_states[user_id]
+        await query.message.edit_text("✅ Добавлено!")
         await back_to_menu(update, context)
 
 async def cancel_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    if user_id in user_states: del user_states[user_id]
+    query = update.callback_query; await query.answer()
+    if query.from_user.id in user_states: del user_states[query.from_user.id]
     await back_to_menu(update, context)
 
 async def back_to_stars_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    user_states[user_id] = {'step': 'stars_amount', 'message_id': query.message.message_id}
-    await query.message.edit_text("⌨️ *Введите желаемое количество звезд числом:*", parse_mode='Markdown')
+    await stars_step1(update, context)
 
-# Premium
+# --- PREMIUM (Кнопки) ---
 async def tg_premium_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    text = (
-        "⚡️ *Telegram Premium*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Эксклюзивные функции для вашего аккаунта.\n\n"
-        "👇 *Выберите срок подписки:*"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("🗓 3 месяца — 1250₽", callback_data='add_tg_tg_premium_3')],
-        [InlineKeyboardButton("🗓 6 месяцев — 1500₽", callback_data='add_tg_tg_premium_6')],
-        [InlineKeyboardButton("🗓 12 месяцев — 2750₽", callback_data='add_tg_tg_premium_12')],
+    query = update.callback_query; await query.answer()
+    kb = [
+        [InlineKeyboardButton("3 мес - 1250₽", callback_data='add_tg_tg_premium_3')],
+        [InlineKeyboardButton("6 мес - 1500₽", callback_data='add_tg_tg_premium_6')],
+        [InlineKeyboardButton("12 мес - 2750₽", callback_data='add_tg_tg_premium_12')],
         [InlineKeyboardButton("🔙 Назад", callback_data='catalog')],
     ]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    await query.message.edit_text("⚡️ *Выберите период:*", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def add_to_cart_and_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    query = update.callback_query; await query.answer()
     user_id = query.from_user.id
-    mapping = {
-        'add_tg_tg_premium_3': Product.TG_PREMIUM_3,
-        'add_tg_tg_premium_6': Product.TG_PREMIUM_6,
-        'add_tg_tg_premium_12': Product.TG_PREMIUM_12
-    }
+    mapping = {'add_tg_tg_premium_3': Product.TG_PREMIUM_3, 'add_tg_tg_premium_6': Product.TG_PREMIUM_6, 'add_tg_tg_premium_12': Product.TG_PREMIUM_12}
     ptype = mapping.get(query.data)
-    product = {'type': ptype, 'name': Product.NAMES[ptype], 'price': Product.PRICES[ptype]}
     if user_id not in user_carts: user_carts[user_id] = []
-    user_carts[user_id].append(product)
-    
-    await query.message.edit_text(f"✅ *{Product.NAMES[ptype]}* добавлен в корзину!", parse_mode='Markdown')
-    
-    keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data='back_to_menu'), InlineKeyboardButton("🛒 К корзине", callback_data='cart')]]
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    user_carts[user_id].append({'type': ptype, 'name': Product.NAMES[ptype], 'price': Product.PRICES[ptype]})
+    await query.message.edit_text(f"✅ {Product.NAMES[ptype]} добавлен!")
+    await back_to_menu(update, context)
 
-# Корзина
+# ================= ОБЩИЙ ФУНКЦИОНАЛ (КОРЗИНА И ОПЛАТА) =================
+
 async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    query = update.callback_query; await query.answer()
     user_id = query.from_user.id
     cart = user_carts.get(user_id, [])
-    
     if not cart:
-        text = (
-            "🛒 *Корзина пуста*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Посмотрите наш каталог, там много интересного!"
-        )
-        keyboard = [[InlineKeyboardButton("🛍 В каталог", callback_data='catalog'), InlineKeyboardButton("🔙 Меню", callback_data='back_to_menu')]]
-    else:
-        total = sum(item['price'] for item in cart)
-        cart_items_text = ""
-        for idx, item in enumerate(cart, 1):
-            cart_items_text += f"▫️ {item['name']} — *{item['price']:.2f}₽*\n"
-        
-        text = (
-            "🧾 *Ваш заказ*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"{cart_items_text}"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 *ИТОГО К ОПЛАТЕ: {total:.2f}₽*"
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("💳 Оплатить картой / СБП (ЮMoney)", callback_data='checkout')],
-            [InlineKeyboardButton("🗑 Очистить корзину", callback_data='clear_cart')],
-            [InlineKeyboardButton("🔙 В меню", callback_data='back_to_menu')],
-        ]
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await query.message.edit_text("🛒 *Корзина пуста*", reply_markup=get_main_menu_keyboard(), parse_mode='Markdown')
+        return
+    total = sum(item['price'] for item in cart)
+    text = "🧾 *Ваш заказ:*\n\n"
+    for idx, item in enumerate(cart, 1): text += f"{idx}. {item['name']} — {item['price']:.2f}₽\n"
+    text += f"\n💰 *Итого: {total:.2f}₽*"
+    kb = [[InlineKeyboardButton("💳 Оплатить (ЮMoney)", callback_data='checkout')], [InlineKeyboardButton("🗑 Очистить", callback_data='clear_cart')], [InlineKeyboardButton("🔙 Меню", callback_data='back_to_menu')]]
+    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def clear_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    user_carts[user_id] = []
-    await query.message.edit_text("🗑 *Корзина успешно очищена!*", parse_mode='Markdown')
-    
-    keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data='back_to_menu')]]
-    await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    user_carts[update.callback_query.from_user.id] = []
+    await show_cart(update, context)
 
-# ==================== ОПЛАТА ====================
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query; await query.answer()
+    cart = user_carts.get(query.from_user.id, [])
+    await query.message.edit_text(f"👤 *Профиль*\nID: `{query.from_user.id}`\nВ корзине: {len(cart)} товаров", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data='back_to_menu')]]), parse_mode='Markdown')
+
+async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.message.edit_text("👨‍💻 Пишите админу: @slayip", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data='back_to_menu')]]))
 
 async def checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
+    query = update.callback_query; await query.answer()
     user_id = query.from_user.id
     cart = user_carts.get(user_id, [])
-    
-    if not cart:
-        await query.message.edit_text("❌ Корзина пуста!")
-        await show_cart(update, context)
-        return
-    
+    if not cart: return
     total = sum(item['price'] for item in cart)
-    
-    # 1. Генерируем ID заказа
     order_id = str(uuid.uuid4())
-    
-    # 2. Сохраняем заказ
-    active_orders[order_id] = {
-        "user_id": user_id,
-        "amount": total,
-        "items": cart
-    }
-    
-    # 3. Создаем ссылку YooMoney
+    active_orders[order_id] = {"user_id": user_id, "amount": total, "items": cart}
     try:
-        quickpay = Quickpay(
-            receiver=YOOMONEY_WALLET,
-            quickpay_form="shop",
-            targets=f"MEPTB Shop: Order {order_id[:8]}",
-            paymentType="SB", 
-            sum=total,
-            label=order_id
-        )
-        
-        checkout_text = (
-            "💳 *Формирование счета*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"💰 Сумма: *{total:.2f}₽*\n"
-            f"📄 Номер заказа: `{order_id[:8]}`\n\n"
-            "❗️ *Инструкция:*\n"
-            "1. Нажмите кнопку «Оплатить» ниже.\n"
-            "2. Выберите удобный способ (Карта, СБП).\n"
-            "3. После оплаты вернитесь сюда и нажмите «Проверить оплату»."
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("🔗 Оплатить (Переход на ЮMoney)", url=quickpay.base_url)],
-            [InlineKeyboardButton("🔄 Проверить оплату", callback_data=f'check_pay_{order_id}')],
-            [InlineKeyboardButton("❌ Отмена", callback_data='back_to_menu')],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.message.edit_text(checkout_text, reply_markup=reply_markup, parse_mode='Markdown')
-
+        quickpay = Quickpay(receiver=YOOMONEY_WALLET, quickpay_form="shop", targets=f"Order {order_id[:8]}", paymentType="SB", sum=total, label=order_id)
+        text = f"💳 *Оплата*\nСумма: {total:.2f}₽\n\n1. Оплатите.\n2. Нажмите 'Проверить'."
+        kb = [[InlineKeyboardButton("🔗 Оплатить", url=quickpay.base_url)], [InlineKeyboardButton("🔄 Проверить", callback_data=f'check_pay_{order_id}')], [InlineKeyboardButton("❌ Отмена", callback_data='back_to_menu')]]
+        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     except Exception as e:
-        logger.error(f"Ошибка создания ссылки: {e}")
-        await query.message.edit_text("❌ Ошибка платежной системы. Свяжитесь с поддержкой.")
+        logger.error(e); await query.message.edit_text("Ошибка создания счета")
 
 async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
+    query = update.callback_query; await query.answer()
     order_id = query.data.replace('check_pay_', '')
     order_data = active_orders.get(order_id)
-    
-    if not order_data:
-        await query.message.answer("⚠️ Срок действия заказа истек или он не найден.")
-        return
-
+    if not order_data: await query.answer("Заказ не найден", show_alert=True); return
     try:
         history = ym_client.operation_history(label=order_id)
-        is_paid = False
-        
-        for operation in history.operations:
-            if operation.status == "success" and operation.label == order_id:
-                is_paid = True
-                break
-        
-        if is_paid:
-            await process_successful_payment(query, context, order_id, order_data)
-        else:
-            await query.answer("⌛️ Оплата еще не поступила. Попробуйте через 10-15 секунд.", show_alert=True)
-            
-    except Exception as e:
-        logger.error(f"Ошибка проверки: {e}")
-        await query.answer("❌ Ошибка соединения с банком.", show_alert=True)
+        if any(op.status == "success" and op.label == order_id for op in history.operations):
+            await process_success(query, context, order_id, order_data)
+        else: await query.answer("Оплата не найдена", show_alert=True)
+    except: await query.answer("Ошибка проверки", show_alert=True)
 
-async def process_successful_payment(query, context, order_id, order_data):
+async def process_success(query, context, order_id, order_data):
     user_id = order_data['user_id']
-    items = order_data['items']
-    total = order_data['amount']
-    user = query.from_user
-    
-    order_text_lines = []
-    for item in items:
-        name_clean = item['name'].replace("*", "") # Чистим Markdown для админки
-        if item.get('amount'):
-            order_text_lines.append(f"- {name_clean}: {item['amount']} шт.")
-        else:
-            order_text_lines.append(f"- {name_clean}")
-    order_text = "\n".join(order_text_lines)
-    
-    admin_message = (
-        f"✅ **НОВАЯ ПРОДАЖА**\n"
-        f"👤 Покупатель: @{user.username if user.username else user_id} (ID: `{user_id}`)\n"
-        f"💰 Сумма: {total:.2f}₽\n\n"
-        f"📦 **Товары:**\n{order_text}\n\n"
-        f"🏷 ID заказа: `{order_id}`"
-    )
-    
-    if user_id in user_carts: del user_carts[user_id]
-    del active_orders[order_id]
-
-    # Красивое сообщение об успехе
-    success_text = (
-        "✅ *Оплата успешно принята!*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Спасибо за покупку в MEPTB Shop! ❤️\n\n"
-        "🚀 *Ваш заказ передан в обработку.*\n"
-        "Администратор уже получил уведомление и скоро свяжется с вами для выдачи товара."
-    )
-    
-    await query.message.edit_text(
-        success_text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 В главное меню", callback_data='back_to_menu')]])
-    )
-    
-    try:
-        keyboard = [[InlineKeyboardButton("💬 Написать покупателю", url=f"tg://user?id={user_id}")]]
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-    except:
-        logger.error("Не удалось отправить сообщение админу")
-
-# Поддержка
-async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    text = (
-        "👨‍💻 *Техническая поддержка*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "Есть вопросы по заказу или ассортименту? \n"
-        "Мы всегда на связи!\n\n"
-        "📞 *Контакты:* @slayip\n"
-        "🕒 *Время работы:* 10:00 - 23:00 (МСК)"
-    )
-    
-    keyboard = [[InlineKeyboardButton("🔙 В меню", callback_data='back_to_menu')]]
-    await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    del user_carts[user_id]; del active_orders[order_id]
+    await query.message.edit_text("✅ *Оплата успешна!* Админ свяжется с вами.", parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
+    try: await context.bot.send_message(ADMIN_ID, f"💰 Новая продажа! {order_data['amount']}₽\nID: {user_id}")
+    except: pass
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Ошибка: {context.error}", exc_info=context.error)
 
-def main():
+# ================= ЗАПУСК =================
+
+async def main():
+    # Настройка БОТА
     application = Application.builder().token(TOKEN).build()
     
+    # Регистрация ВСЕХ обработчиков
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     
+    # Меню и общие
     application.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back_to_menu$'))
-    application.add_handler(CallbackQueryHandler(show_catalog, pattern='^catalog$'))
     application.add_handler(CallbackQueryHandler(show_cart, pattern='^cart$'))
     application.add_handler(CallbackQueryHandler(show_support, pattern='^support$'))
     application.add_handler(CallbackQueryHandler(show_profile, pattern='^profile$'))
-    
-    application.add_handler(CallbackQueryHandler(stars_step1, pattern='^stars$'))
-    application.add_handler(CallbackQueryHandler(confirm_stars, pattern='^confirm_stars$'))
-    application.add_handler(CallbackQueryHandler(cancel_stars, pattern='^cancel_stars$'))
-    application.add_handler(CallbackQueryHandler(back_to_stars_input, pattern='^back_to_stars_input$'))
-    
-    application.add_handler(CallbackQueryHandler(tg_premium_option, pattern='^tg_premium$'))
-    application.add_handler(CallbackQueryHandler(add_to_cart_and_back, pattern='^add_tg_tg_premium_'))
-    
     application.add_handler(CallbackQueryHandler(clear_cart, pattern='^clear_cart$'))
     application.add_handler(CallbackQueryHandler(checkout, pattern='^checkout$'))
     application.add_handler(CallbackQueryHandler(check_payment, pattern='^check_pay_'))
     
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_stars_amount))
+    # СТАРАЯ ЛОГИКА (КНОПКИ)
+    application.add_handler(CallbackQueryHandler(show_catalog, pattern='^catalog$'))
+    application.add_handler(CallbackQueryHandler(stars_step1, pattern='^stars$'))
+    application.add_handler(CallbackQueryHandler(confirm_stars, pattern='^confirm_stars$'))
+    application.add_handler(CallbackQueryHandler(cancel_stars, pattern='^cancel_stars$'))
+    application.add_handler(CallbackQueryHandler(back_to_stars_input, pattern='^back_to_stars_input$'))
+    application.add_handler(CallbackQueryHandler(tg_premium_option, pattern='^tg_premium$'))
+    application.add_handler(CallbackQueryHandler(add_to_cart_and_back, pattern='^add_tg_'))
     
+    # Ввод текста (для звезд)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_stars_amount))
     application.add_error_handler(error_handler)
     
-    print("Бот MEPTB Shop (Pro Design) запущен...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # Запуск бота
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    print("🤖 Бот запущен...")
+
+    # Настройка ВЕБ-СЕРВЕРА
+    app = web.Application()
+    app.router.add_get('/', http_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 3000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    print(f"🌍 Веб-сервер на порту {port}")
+    await site.start()
+
+    stop_event = asyncio.Event()
+    await stop_event.wait()
+    await application.stop(); await application.shutdown()
 
 if __name__ == '__main__':
-    main()
+    try: asyncio.run(main())
+    except KeyboardInterrupt: pass
