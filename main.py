@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 
 # ================= КОНФИГУРАЦИЯ =================
 
-TOKEN = "ВСТАВЬ_ТОКЕН_БОТА"
+TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"
 ADMIN_ID = 1691654877
-YOOMONEY_TOKEN = "ВСТАВЬ_ТОКЕН_ЮМАНИ"
-YOOMONEY_WALLET = "ВСТАВЬ_НОМЕР_КОШЕЛЬКА"
+YOOMONEY_TOKEN = "86F31496F52C1B607A0D306BE0CAE639CFAFE7A45D3C88AF4E1759B22004954D"
+YOOMONEY_WALLET = "4100118889570559"
 
 # Ссылка на Mini App (Твой домен)
 WEB_APP_URL = "https://mertvshop.bothost.tu" 
