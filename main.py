@@ -32,7 +32,7 @@ YOOMONEY_TOKEN = "86F31496F52C1B607A0D306BE0CAE639CFAFE7A45D3C88AF4E1759B2200495
 YOOMONEY_WALLET = "4100118889570559"
 
 # Ссылка на Mini App (Твой домен)
-WEB_APP_URL = "https://mertvshop.bothost.tu" 
+WEB_APP_URL = "https://mertvshop.bothost.ru" 
 
 # ================= ИНИЦИАЛИЗАЦИЯ =================
 
