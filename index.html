@@ -10,7 +10,7 @@
             --bg-color: #0f0f11;
             --card-bg: #1c1c1e;
             --text-color: #ffffff;
-            --accent-color: #a980f5; /* Фиолетовый неон */
+            --accent-color: #a980f5;
             --accent-gradient: linear-gradient(135deg, #a980f5 0%, #7b51d8 100%);
             --secondary-text: #8e8e93;
             --border-radius: 16px;
@@ -21,314 +21,269 @@
             color: var(--text-color);
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 20px;
-            padding-bottom: 90px; /* Отступ для главной кнопки */
+            padding: 16px;
+            padding-bottom: 90px;
             -webkit-tap-highlight-color: transparent;
+            user-select: none;
         }
 
-        /* Заголовок с анимацией */
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-            animation: fadeIn 0.8s ease;
-        }
+        /* Система экранов */
+        .view { display: none; animation: fadeIn 0.4s ease; }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Стили компонентов */
+        header { text-align: center; margin-bottom: 25px; margin-top: 10px; }
+        h1 { margin: 0; font-size: 26px; font-weight: 800; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        p.subtitle { margin-top: 5px; color: var(--secondary-text); font-size: 14px; }
+        .section-title { font-size: 13px; font-weight: 700; color: var(--secondary-text); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; margin-left: 5px; }
+
+        .card { background: var(--card-bg); border-radius: var(--border-radius); padding: 16px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.05); }
         
-        h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: 800;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: -0.5px;
-        }
+        .stars-input-wrapper { position: relative; margin-top: 15px; }
+        .stars-input { width: 100%; background: #2c2c2e; border: 2px solid transparent; color: white; padding: 14px; padding-right: 40px; border-radius: 12px; font-size: 18px; font-weight: 600; box-sizing: border-box; outline: none; transition: 0.3s; }
+        .stars-input:focus { border-color: var(--accent-color); background: #3a3a3c; }
+        .star-icon { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); font-size: 18px; pointer-events: none; }
+        .price-tag { display: flex; justify-content: space-between; margin-top: 10px; font-size: 13px; color: var(--secondary-text); }
         
-        p.subtitle {
-            margin-top: 5px;
-            color: var(--secondary-text);
-            font-size: 14px;
-        }
+        .product-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 16px; background: var(--card-bg); border-radius: var(--border-radius); border: 1px solid rgba(255,255,255,0.05); }
+        .product-info h3 { margin: 0; font-size: 15px; font-weight: 600; }
+        .product-info p { margin: 4px 0 0; color: var(--accent-color); font-weight: 600; font-size: 14px; }
 
-        .section-title {
-            font-size: 13px;
-            font-weight: 700;
-            color: var(--secondary-text);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 12px;
-            margin-left: 5px;
-        }
+        .counter { display: flex; align-items: center; gap: 12px; background: #2c2c2e; padding: 4px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); }
+        .btn-circle { width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent; color: white; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .count-val { font-weight: 700; min-width: 20px; text-align: center; font-size: 16px; }
 
-        /* Карточка Stars */
-        .stars-card {
-            background: var(--card-bg);
-            border-radius: var(--border-radius);
-            padding: 20px;
-            margin-bottom: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.05);
-            transition: transform 0.2s;
-        }
+        /* Экран оплаты */
+        .payment-info { text-align: center; padding: 20px; }
+        .total-amount { font-size: 42px; font-weight: 800; color: white; margin: 20px 0; }
+        .order-id { font-family: monospace; color: var(--secondary-text); background: #2c2c2e; padding: 5px 10px; border-radius: 8px; }
         
-        .stars-input-wrapper {
-            position: relative;
-            margin-top: 15px;
+        .btn-main {
+            width: 100%; padding: 16px; border-radius: 14px; border: none; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 10px; text-align: center;
         }
+        .btn-pay { background: var(--accent-gradient); color: white; box-shadow: 0 4px 15px rgba(169, 128, 245, 0.4); }
+        .btn-check { background: #2c2c2e; color: white; border: 1px solid rgba(255,255,255,0.1); }
+        .btn-back { background: transparent; color: var(--secondary-text); }
 
-        .stars-input {
-            width: 100%;
-            background: #2c2c2e;
-            border: 2px solid transparent;
-            color: white;
-            padding: 16px;
-            padding-right: 50px;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            box-sizing: border-box;
-            outline: none;
-            transition: all 0.3s;
-        }
-
-        .stars-input:focus {
-            border-color: var(--accent-color);
-            background: #3a3a3c;
-            box-shadow: 0 0 15px rgba(169, 128, 245, 0.2);
-        }
-
-        .star-icon {
-            position: absolute;
-            right: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 20px;
-            pointer-events: none;
-        }
-
-        .price-tag {
-            font-size: 13px;
-            color: var(--accent-color);
-            margin-top: 8px;
-            font-weight: 500;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        /* Карточки Premium */
-        .premium-grid {
-            display: grid;
-            gap: 12px;
-        }
-
-        .product-card {
-            background: var(--card-bg);
-            border-radius: var(--border-radius);
-            padding: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border: 1px solid rgba(255,255,255,0.05);
-            position: relative;
-            overflow: hidden;
-        }
-
-        /* Эффект свечения для Premium */
-        .product-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 4px; height: 100%;
-            background: var(--accent-gradient);
-            opacity: 0.7;
-        }
-
-        .product-info h3 {
-            margin: 0;
-            font-size: 16px;
-            font-weight: 600;
-        }
-
-        .product-info p {
-            margin: 4px 0 0;
-            color: var(--accent-color);
-            font-weight: 600;
-            font-size: 14px;
-        }
-
-        .counter {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            background: #2c2c2e;
-            padding: 4px;
-            border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .btn-circle {
-            width: 32px; height: 32px;
-            border-radius: 50%;
-            border: none;
-            background: transparent;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-        }
-
-        .btn-circle:active {
-            background: rgba(255,255,255,0.1);
-            transform: scale(0.9);
-        }
-
-        .count-val {
-            font-weight: 700;
-            min-width: 20px;
-            text-align: center;
-            font-size: 16px;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        /* Экран успеха */
+        .success-icon { font-size: 80px; margin-bottom: 20px; display: block; }
     </style>
 </head>
 <body>
 
-    <header>
-        <h1>MEPTB STORE 💎</h1>
-        <p class="subtitle">Premium Digital Goods</p>
-    </header>
+    <!-- ЭКРАН 1: КАТАЛОГ -->
+    <div id="view-catalog" class="view active">
+        <header>
+            <h1>MEPTB STORE</h1>
+            <p class="subtitle">Premium Digital Goods</p>
+        </header>
 
-    <!-- СЕКЦИЯ STARS -->
-    <div class="section-title">Telegram Stars</div>
-    <div class="stars-card">
-        <label style="font-weight: 600; font-size: 15px;">Покупка звёзд</label>
-        <div class="stars-input-wrapper">
-            <input type="number" id="starsAmount" class="stars-input" placeholder="Количество" oninput="updateMainButton()">
-            <span class="star-icon">⭐️</span>
-        </div>
-        <div class="price-tag">
-            <span>Курс: 1.6₽ / шт.</span>
-            <span id="starsTotal">0₽</span>
-        </div>
-    </div>
-
-    <!-- СЕКЦИЯ PREMIUM -->
-    <div class="section-title">Telegram Premium</div>
-    <div class="premium-grid">
-        
-        <div class="product-card">
-            <div class="product-info">
-                <h3>Premium 3 Мес.</h3>
-                <p>1,250₽</p>
+        <div class="section-title">Telegram Stars ⭐️</div>
+        <div class="card">
+            <label style="font-weight: 600; font-size: 15px;">Введите количество:</label>
+            <div class="stars-input-wrapper">
+                <input type="number" inputmode="numeric" id="starsAmount" class="stars-input" placeholder="0" oninput="updateUI()">
+                <span class="star-icon">⭐️</span>
             </div>
+            <div class="price-tag">
+                <span>Курс: 1.6₽ / шт.</span>
+                <span id="starsTotal" style="color: var(--accent-color); font-weight: 700;">0₽</span>
+            </div>
+        </div>
+
+        <div class="section-title">Telegram Premium ⚡️</div>
+        <div class="product-item">
+            <div class="product-info"><h3>3 Месяца</h3><p>1,250₽</p></div>
             <div class="counter">
                 <button class="btn-circle" onclick="changeCount('tg_premium_3', -1)">−</button>
                 <span id="count-tg_premium_3" class="count-val">0</span>
                 <button class="btn-circle" onclick="changeCount('tg_premium_3', 1)">+</button>
             </div>
         </div>
-
-        <div class="product-card">
-            <div class="product-info">
-                <h3>Premium 6 Мес.</h3>
-                <p>1,500₽</p>
-            </div>
+        <div class="product-item">
+            <div class="product-info"><h3>6 Месяцев</h3><p>1,500₽</p></div>
             <div class="counter">
                 <button class="btn-circle" onclick="changeCount('tg_premium_6', -1)">−</button>
                 <span id="count-tg_premium_6" class="count-val">0</span>
                 <button class="btn-circle" onclick="changeCount('tg_premium_6', 1)">+</button>
             </div>
         </div>
-
-        <div class="product-card">
-            <div class="product-info">
-                <h3>Premium 12 Мес.</h3>
-                <p>2,750₽</p>
-            </div>
+        <div class="product-item">
+            <div class="product-info"><h3>12 Месяцев</h3><p>2,750₽</p></div>
             <div class="counter">
                 <button class="btn-circle" onclick="changeCount('tg_premium_12', -1)">−</button>
                 <span id="count-tg_premium_12" class="count-val">0</span>
                 <button class="btn-circle" onclick="changeCount('tg_premium_12', 1)">+</button>
             </div>
         </div>
+    </div>
 
+    <!-- ЭКРАН 2: ОПЛАТА -->
+    <div id="view-payment" class="view">
+        <header>
+            <h1>Оплата</h1>
+            <p class="subtitle">Заказ сформирован</p>
+        </header>
+
+        <div class="payment-info">
+            <div style="font-size: 14px; color: #8e8e93;">К оплате:</div>
+            <div class="total-amount" id="pay-amount">0₽</div>
+            <div style="margin-bottom: 30px;">
+                ID: <span class="order-id" id="pay-id">...</span>
+            </div>
+
+            <button class="btn-main btn-pay" id="btn-pay-link" onclick="openPaymentLink()">
+                💳 Оплатить сейчас
+            </button>
+            
+            <button class="btn-main btn-check" onclick="checkPayment()">
+                🔄 Я оплатил
+            </button>
+            
+            <button class="btn-main btn-back" onclick="switchView('view-catalog')">
+                Вернуться назад
+            </button>
+        </div>
+    </div>
+
+    <!-- ЭКРАН 3: УСПЕХ -->
+    <div id="view-success" class="view" style="text-align: center; padding-top: 50px;">
+        <span class="success-icon">✅</span>
+        <h1 style="margin-bottom: 10px;">Успешно!</h1>
+        <p style="color: #8e8e93; margin-bottom: 30px;">Ваш заказ оплачен.<br>Администратор скоро свяжется с вами.</p>
+        <button class="btn-main btn-check" onclick="Telegram.WebApp.close()">Закрыть</button>
     </div>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
-        tg.enableClosingConfirmation(); // Спрашивать перед закрытием
-
-        // Данные
+        
+        // Переменные состояния
         let cart = { tg_premium_3: 0, tg_premium_6: 0, tg_premium_12: 0 };
         const PRICES = { tg_premium_3: 1250, tg_premium_6: 1500, tg_premium_12: 2750 };
         const STARS_PRICE = 1.6;
+        
+        let currentOrderId = null;
+        let currentPaymentUrl = null;
 
-        // Логика счетчиков
-        function changeCount(id, delta) {
-            // Вибрация
-            tg.HapticFeedback.impactOccurred('light');
-            
-            cart[id] += delta;
-            if (cart[id] < 0) cart[id] = 0;
-            
-            // Анимация цифры
-            const el = document.getElementById(`count-${id}`);
-            el.innerText = cart[id];
-            el.style.transform = "scale(1.2)";
-            setTimeout(() => el.style.transform = "scale(1)", 150);
+        // --- ЛОГИКА ИНТЕРФЕЙСА ---
 
-            updateMainButton();
-        }
-
-        // Логика главной кнопки
-        function updateMainButton() {
-            let total = 0;
+        function switchView(viewId) {
+            document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active');
             
-            // Считаем премиум
-            for (let key in cart) total += cart[key] * PRICES[key];
-            
-            // Считаем звезды
-            let starsInput = document.getElementById('starsAmount');
-            let starsVal = parseInt(starsInput.value) || 0;
-            if (starsVal < 0) starsVal = 0;
-            
-            let starsCost = starsVal * STARS_PRICE;
-            document.getElementById('starsTotal').innerText = starsCost.toFixed(1) + "₽";
-            
-            total += starsCost;
-
-            if (total > 0) {
-                tg.MainButton.setText(`Оформить за ${total.toLocaleString('ru-RU')}₽`);
-                tg.MainButton.show();
-                // Настраиваем цвет кнопки под стиль
-                tg.MainButton.setParams({
-                    color: '#a980f5',
-                    text_color: '#ffffff'
-                });
+            // Управляем главной кнопкой Телеграма
+            if (viewId === 'view-catalog') {
+                updateUI();
             } else {
                 tg.MainButton.hide();
             }
         }
 
-        // Отправка данных боту
-        Telegram.WebApp.onEvent('mainButtonClicked', function(){
-            tg.HapticFeedback.notificationOccurred('success');
+        function changeCount(id, delta) {
+            tg.HapticFeedback.selectionChanged();
+            cart[id] += delta;
+            if (cart[id] < 0) cart[id] = 0;
+            document.getElementById(`count-${id}`).innerText = cart[id];
+            updateUI();
+        }
+
+        function updateUI() {
+            let total = 0;
+            for (let key in cart) total += cart[key] * PRICES[key];
+
+            let starsInput = document.getElementById('starsAmount').value;
+            let starsVal = parseInt(starsInput) || 0;
+            if (starsVal < 0) starsVal = 0;
+            
+            let starsCost = starsVal * STARS_PRICE;
+            document.getElementById('starsTotal').innerText = starsCost.toLocaleString('ru-RU') + "₽";
+            total += starsCost;
+
+            if (total > 0) {
+                tg.MainButton.setText(`Перейти к оплате (${total.toLocaleString('ru-RU')}₽)`);
+                tg.MainButton.show();
+                tg.MainButton.setParams({ color: '#a980f5', text_color: '#ffffff' });
+            } else {
+                tg.MainButton.hide();
+            }
+        }
+
+        // --- ЛОГИКА СЕТИ (ОБЩЕНИЕ С БОТОМ) ---
+
+        // 1. Нажатие на главную кнопку "Оформить"
+        Telegram.WebApp.onEvent('mainButtonClicked', async function() {
+            tg.MainButton.showProgress();
             
             let starsVal = parseInt(document.getElementById('starsAmount').value) || 0;
-            
-            const data = {
+            const payload = {
                 cart: cart,
-                stars: starsVal
+                stars: starsVal,
+                user_id: tg.initDataUnsafe?.user?.id || 0
             };
-            
-            tg.sendData(JSON.stringify(data));
+
+            try {
+                // Отправляем данные на сервер бота
+                const response = await fetch('/api/create_order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    // Успех, переходим на экран оплаты
+                    currentOrderId = data.order_id;
+                    currentPaymentUrl = data.payment_url;
+                    
+                    document.getElementById('pay-amount').innerText = data.amount + '₽';
+                    document.getElementById('pay-id').innerText = '#' + data.order_id.slice(0, 8);
+                    
+                    switchView('view-payment');
+                } else {
+                    alert('Ошибка создания заказа');
+                }
+            } catch (e) {
+                alert('Ошибка соединения с сервером');
+            } finally {
+                tg.MainButton.hideProgress();
+            }
         });
+
+        // 2. Открытие ссылки оплаты
+        function openPaymentLink() {
+            if (currentPaymentUrl) {
+                tg.openLink(currentPaymentUrl); // Открывает в браузере поверх приложения
+            }
+        }
+
+        // 3. Проверка оплаты
+        async function checkPayment() {
+            if (!currentOrderId) return;
+            
+            tg.HapticFeedback.notificationOccurred('warning'); // Вибрация ожидания
+            
+            try {
+                const response = await fetch(`/api/check_payment?order_id=${currentOrderId}`);
+                const data = await response.json();
+                
+                if (data.paid) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                    switchView('view-success');
+                } else {
+                    tg.HapticFeedback.notificationOccurred('error');
+                    tg.showPopup({
+                        title: 'Оплата не найдена',
+                        message: 'Мы пока не видим поступления средств. Если вы оплатили, подождите 30 секунд и нажмите кнопку снова.',
+                        buttons: [{type: 'ok'}]
+                    });
+                }
+            } catch (e) {
+                alert('Ошибка проверки');
+            }
+        }
     </script>
 </body>
 </html>
