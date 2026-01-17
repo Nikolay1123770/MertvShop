@@ -1,9 +1,10 @@
-# mëpтв 🥀 | Декабрьский снег ♡ | Full SPA Edition
+# mëpтв 🥀 | Декабрьский снег ♡ | FIXED PATHS EDITION
 import logging
 import uuid
 import json
 import asyncio
 import os
+import sys
 from typing import Dict, List
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
@@ -58,15 +59,19 @@ class Product:
         TG_PREMIUM_12: "Premium 12 мес.",
     }
 
-# ================= API ДЛЯ САЙТА (WEB APP) =================
+# ================= API ДЛЯ САЙТА (ИСПРАВЛЕН ПУТЬ) =================
 
 async def http_index(request):
-    """Отдает HTML файл"""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    file_path = os.path.join(current_dir, "index.html")
+    """Отдает HTML файл, вычисляя абсолютный путь"""
+    # Получаем папку, где лежит этот скрипт (main.py)
+    base_path = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_path, "index.html")
+    
     if os.path.exists(file_path):
         return web.FileResponse(file_path)
-    return web.Response(text="404: index.html not found", status=404)
+    else:
+        # Для отладки: покажем, где мы искали файл
+        return web.Response(text=f"Error 404: index.html not found.\nSearched in: {file_path}", status=404)
 
 async def api_create_order(request):
     """Создает заказ и возвращает ссылку на оплату"""
@@ -76,7 +81,6 @@ async def api_create_order(request):
         cart_items = data.get('cart', {})
         stars_amount = data.get('stars', 0)
         
-        # Считаем сумму на сервере (безопасно)
         total_price = 0
         items_list = []
 
@@ -94,7 +98,6 @@ async def api_create_order(request):
         if total_price <= 0:
             return web.json_response({'status': 'error', 'message': 'Empty cart'})
 
-        # Генерируем ссылку
         order_id = str(uuid.uuid4())
         active_orders[order_id] = {
             "user_id": user_id,
@@ -123,7 +126,6 @@ async def api_create_order(request):
         return web.json_response({'status': 'error'}, status=500)
 
 async def api_check_payment(request):
-    """Проверяет оплату по запросу с сайта"""
     order_id = request.query.get('order_id')
     order_data = active_orders.get(order_id)
     
@@ -135,7 +137,6 @@ async def api_check_payment(request):
         is_paid = any(op.status == "success" and op.label == order_id for op in history.operations)
         
         if is_paid:
-            # Если оплачено - уведомляем админа и удаляем заказ
             await notify_admin_success(order_id, order_data)
             del active_orders[order_id]
             return web.json_response({'paid': True})
@@ -146,14 +147,12 @@ async def api_check_payment(request):
         logger.error(f"Check Error: {e}")
         return web.json_response({'paid': False})
 
-# Глобальная переменная для application, чтобы отправлять сообщения
 bot_app = None 
 
 async def notify_admin_success(order_id, order_data):
-    """Отправляет уведомление админу в Телеграм"""
     if bot_app:
         msg = (
-            f"💰 **НОВАЯ ОПЛАТА (Через WebApp)**\n"
+            f"💰 **НОВАЯ ОПЛАТА (WebApp)**\n"
             f"Сумма: {order_data['amount']}₽\n"
             f"User ID: `{order_data['user_id']}`\n"
             f"Товары: {order_data['items_text']}\n"
@@ -161,12 +160,10 @@ async def notify_admin_success(order_id, order_data):
         )
         try:
             await bot_app.bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode='Markdown')
-            # Можно и пользователю спасибо сказать
             await bot_app.bot.send_message(chat_id=order_data['user_id'], text="✅ Оплата получена! Ждите выдачи.")
-        except:
-            pass
+        except: pass
 
-# ================= БОТ (ТОЛЬКО ЗАПУСК И МЕНЮ) =================
+# ================= БОТ =================
 
 def get_main_menu_keyboard():
     return InlineKeyboardMarkup([
@@ -188,7 +185,7 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     global bot_app
     
-    # 1. Запуск Бота
+    # 1. БОТ
     bot_app = Application.builder().token(TOKEN).build()
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CallbackQueryHandler(show_support, pattern='^support$'))
@@ -198,11 +195,11 @@ async def main():
     await bot_app.updater.start_polling()
     print("🤖 Бот работает...")
 
-    # 2. Запуск Веб-сервера (API + Сайт)
+    # 2. WEB SERVER
     app = web.Application()
-    app.router.add_get('/', http_index)              # Главная
-    app.router.add_post('/api/create_order', api_create_order) # Создание заказа
-    app.router.add_get('/api/check_payment', api_check_payment) # Проверка
+    app.router.add_get('/', http_index)              
+    app.router.add_post('/api/create_order', api_create_order) 
+    app.router.add_get('/api/check_payment', api_check_payment)
     
     runner = web.AppRunner(app)
     await runner.setup()
