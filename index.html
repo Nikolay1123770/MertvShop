@@ -193,11 +193,34 @@
         .check-btn {
             width: 100%; background: #2c2c2e; color: white; border: none; padding: 15px; border-radius: 16px; font-size: 16px; font-weight: 600; margin-top: 10px;
         }
+        
+        /* ЛОАДЕР */
+        .loader {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: var(--active-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* СТАТУС ОПЛАТЫ */
+        .payment-status {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            height: 40px;
+        }
 
         /* АНИМАЦИИ */
         .pulse { animation: pulse 0.2s ease; }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(0.95); } 100% { transform: scale(1); } }
-
     </style>
 </head>
 <body>
@@ -280,8 +303,18 @@
         </div>
 
         <button class="pay-btn" onclick="openLink()">💳 Оплатить (ЮMoney)</button>
-        <button class="check-btn" onclick="checkPay()">🔄 Я оплатил</button>
+        <div class="payment-status" id="payment-status">
+            Ожидание оплаты...
+        </div>
         <button class="check-btn" style="background: transparent; color: #8e8e93;" onclick="navTo('cart')">Вернуться</button>
+    </div>
+
+    <!-- СТРАНИЦА: ОЖИДАНИЕ ПОДТВЕРЖДЕНИЯ -->
+    <div id="page-waiting" class="page" style="text-align: center; padding-top: 60px;">
+        <div class="loader"></div>
+        <h1>Проверка оплаты</h1>
+        <p style="color: #8e8e93;">Пожалуйста, подождите. Это может занять до минуты.</p>
+        <p style="color: var(--active-color);" id="waiting-status">Обработка платежа...</p>
     </div>
 
     <!-- СТРАНИЦА: УСПЕХ -->
@@ -330,24 +363,37 @@
         
         // Оплата
         let currentOrder = { id: null, url: null };
+        let paymentCheckInterval = null;
 
         // --- НАВИГАЦИЯ ---
         function navTo(pageId) {
             // Вибрация
             tg.HapticFeedback.selectionChanged();
 
+            // Если возвращаемся с экрана оплаты в корзину, сбрасываем проверку платежа
+            if (pageId === 'cart' && document.getElementById('page-payment').classList.contains('active')) {
+                stopPaymentCheck();
+            }
+
             // Переключение вкладок
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
             document.getElementById('page-' + pageId).classList.add('active');
 
-            // Подсветка кнопок меню
-            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
-            // Находим индекс кнопки (костыль, но рабочий)
-            let idx = 0;
-            if (pageId === 'stars') idx = 0;
-            if (pageId === 'premium') idx = 1;
-            if (pageId === 'cart') idx = 2;
-            document.querySelectorAll('.nav-item')[idx].classList.add('active');
+            // Показываем нижнее меню только на основных вкладках
+            if (['stars', 'premium', 'cart'].includes(pageId)) {
+                document.querySelector('.bottom-nav').style.display = 'flex';
+                
+                // Подсветка кнопок меню
+                document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+                // Находим индекс кнопки
+                let idx = 0;
+                if (pageId === 'stars') idx = 0;
+                if (pageId === 'premium') idx = 1;
+                if (pageId === 'cart') idx = 2;
+                document.querySelectorAll('.nav-item')[idx].classList.add('active');
+            } else {
+                document.querySelector('.bottom-nav').style.display = 'none';
+            }
 
             // Если открыли корзину - рендерим её
             if (pageId === 'cart') renderCart();
@@ -454,6 +500,7 @@
         }
 
         function removeStars() {
+            state.stars = 0;
             document.getElementById('starsAmount').value = '';
             updateCartUI();
             renderCart();
@@ -468,7 +515,7 @@
         async function startPayment() {
             tg.MainButton.showProgress();
             
-            // Формируем payload как в прошлом коде
+            // Формируем payload
             const payload = {
                 cart: state.premium,
                 stars: state.stars,
@@ -491,40 +538,95 @@
                     document.getElementById('pay-id').innerText = '#' + data.order_id.slice(0, 8);
                     
                     // Переход на экран оплаты
-                    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-                    document.getElementById('page-payment').classList.add('active');
-                    // Скрываем нижнее меню на этапе оплаты
-                    document.querySelector('.bottom-nav').style.display = 'none';
+                    navTo('payment');
+                    
+                    // Начинаем автоматическую проверку статуса
+                    startPaymentCheck();
                 }
             } catch (e) {
-                alert('Ошибка: ' + e);
+                tg.showAlert('Ошибка: ' + e);
             } finally {
                 tg.MainButton.hideProgress();
             }
         }
 
         function openLink() {
-            if (currentOrder.url) tg.openLink(currentOrder.url);
+            if (currentOrder.url) {
+                tg.openLink(currentOrder.url);
+                // Обновляем статус
+                document.getElementById('payment-status').innerHTML = 
+                    '<span style="color: var(--active-color);">Переход к оплате...</span><br>' +
+                    '<span style="font-size: 12px; margin-top: 5px; display: block;">После оплаты статус обновится автоматически</span>';
+            }
         }
 
-        async function checkPay() {
+        // Автоматическая проверка платежа
+        function startPaymentCheck() {
+            // Очищаем предыдущий интервал, если был
+            stopPaymentCheck();
+            
+            // Сначала показываем сообщение о проверке
+            document.getElementById('payment-status').textContent = 'Ожидание автоматического подтверждения оплаты...';
+            
+            // Запускаем проверку каждые 3 секунды
+            paymentCheckInterval = setInterval(checkPaymentStatus, 3000);
+        }
+
+        function stopPaymentCheck() {
+            if (paymentCheckInterval) {
+                clearInterval(paymentCheckInterval);
+                paymentCheckInterval = null;
+            }
+        }
+
+        async function checkPaymentStatus() {
             if (!currentOrder.id) return;
-            tg.HapticFeedback.notificationOccurred('warning');
             
             try {
                 const response = await fetch(`/api/check_payment?order_id=${currentOrder.id}`);
                 const data = await response.json();
                 
                 if (data.paid) {
+                    // Оплата подтверждена
+                    stopPaymentCheck();
                     tg.HapticFeedback.notificationOccurred('success');
-                    document.getElementById('page-payment').classList.remove('active');
-                    document.getElementById('page-success').classList.add('active');
+                    navTo('success');
                 } else {
-                    tg.HapticFeedback.notificationOccurred('error');
-                    tg.showAlert('Оплата пока не найдена. Попробуйте через 15 секунд.');
+                    // Обновляем статус, если есть сообщение
+                    if (data.message) {
+                        document.getElementById('payment-status').textContent = data.message;
+                    }
                 }
-            } catch (e) { alert('Ошибка сети'); }
+            } catch (e) {
+                console.error('Ошибка проверки платежа:', e);
+            }
         }
+        
+        // Проверяем URL при загрузке, чтобы обработать возврат из платежной системы
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const orderId = urlParams.get('order_id');
+            
+            if (orderId) {
+                // Если есть order_id в URL, значит мы вернулись после оплаты
+                currentOrder.id = orderId;
+                navTo('waiting');
+                document.getElementById('waiting-status').textContent = 'Проверка статуса оплаты...';
+                
+                // Проверяем статус платежа
+                checkPaymentStatus().then(() => {
+                    // Через 5 секунд, если всё еще на странице ожидания, перейдём на страницу успеха
+                    setTimeout(() => {
+                        if (document.getElementById('page-waiting').classList.contains('active')) {
+                            navTo('success');
+                        }
+                    }, 5000);
+                });
+            }
+        }
+        
+        // Запускаем проверку URL при загрузке
+        checkUrlParams();
     </script>
 </body>
 </html>
