@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"
 ADMIN_ID = 1691654877
-YOOMONEY_WALLET = "4100118944797800"
+YOOMONEY_WALLET = "4100118889570559"
 YOOMONEY_NOTIFICATION_SECRET = "fL8QIMDHIeudGlqCPNR7eux/"
 WEB_APP_URL = "https://mertvshop.bothost.ru"
 
