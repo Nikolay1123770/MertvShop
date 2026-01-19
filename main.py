@@ -1,10 +1,11 @@
-# mëpтв 🥀 | Декабрьский снег ♡ | DEBUG EDITION
 import logging
 import uuid
 import json
 import asyncio
 import os
 import sys
+import hmac
+import hashlib
 from typing import Dict, List
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
@@ -23,18 +24,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-# Оставляем httpx в WARNING, чтобы не спамил
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("apscheduler").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"
 ADMIN_ID = 1691654877
-YOOMONEY_TOKEN = "4100118889570559.A35EC9B62E4E603A5FE59B9222243E155A833BE62506A0E57984A9A857D8474C5351DCF3EEB57FBEA2814AA5C7CE4EF955FA1FAB9D467A63D36574D6A22A341D967E629707F087B326175715D2B7B6ECE6C23B39A873FE6C12F4CC0AC53F81EDECA600DEAD1E109A9DA3DB8E5F5FB901B2EF79108BD40D806D62A62294540E4D"
-YOOMONEY_WALLET = "4100118889570559"
-WEB_APP_URL = "https://mertvshop.bothost.ru"
+YOOMONEY_TOKEN = "ЮМани-токен"
+YOOMONEY_WALLET = "4100118944797800"
+YOOMONEY_NOTIFICATION_SECRET = "fL8QIMDHIeudGlqCPNR7eux/"  # Получить в настройках HTTP-уведомлений
+WEB_APP_URL = "https://mertvshop.bothost.ru" 
 
 # ================= ИНИЦИАЛИЗАЦИЯ =================
 try:
@@ -63,19 +61,22 @@ class Product:
         TG_PREMIUM_12: "Premium 12 мес.",
     }
 
-# ================= API ДЛЯ САЙТА =================
+# ================= API ДЛЯ САЙТА (ИСПРАВЛЕН ПУТЬ) =================
 
 async def http_index(request):
-    """Отдает HTML файл"""
+    """Отдает HTML файл, вычисляя абсолютный путь"""
+    # Получаем папку, где лежит этот скрипт (main.py)
     base_path = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_path, "index.html")
     
     if os.path.exists(file_path):
         return web.FileResponse(file_path)
     else:
-        return web.Response(text=f"Error 404: index.html not found.\nPath: {file_path}", status=404)
+        # Для отладки: покажем, где мы искали файл
+        return web.Response(text=f"Error 404: index.html not found.\nSearched in: {file_path}", status=404)
 
 async def api_create_order(request):
+    """Создает заказ и возвращает ссылку на оплату"""
     try:
         data = await request.json()
         user_id = data.get('user_id')
@@ -85,11 +86,13 @@ async def api_create_order(request):
         total_price = 0
         items_list = []
 
+        # Premium
         for p_id, count in cart_items.items():
             if count > 0 and p_id in Product.PRICES:
                 total_price += count * Product.PRICES[p_id]
                 items_list.append(f"{Product.NAMES[p_id]} x{count}")
 
+        # Stars
         if stars_amount > 0:
             total_price += stars_amount * Product.PRICES[Product.STARS]
             items_list.append(f"Stars ⭐️ x{stars_amount}")
@@ -101,7 +104,8 @@ async def api_create_order(request):
         active_orders[order_id] = {
             "user_id": user_id,
             "amount": total_price,
-            "items_text": ", ".join(items_list)
+            "items_text": ", ".join(items_list),
+            "status": "pending"
         }
 
         quickpay = Quickpay(
@@ -125,60 +129,103 @@ async def api_create_order(request):
         return web.json_response({'status': 'error'}, status=500)
 
 async def api_check_payment(request):
-    """УСИЛЕННАЯ ПРОВЕРКА С ЛОГАМИ"""
     order_id = request.query.get('order_id')
     order_data = active_orders.get(order_id)
     
     if not order_data:
         return web.json_response({'paid': False, 'error': 'Order not found'})
-
+    
+    # Проверяем статус заказа в нашей системе
+    if order_data.get('status') == 'paid':
+        return web.json_response({'paid': True})
+        
+    # Если не оплачено в системе, проверяем через API
     try:
-        # Запрашиваем последние 10 операций
-        history = ym_client.operation_history(records=10)
-        is_paid = False
-        
-        logger.info(f"🔍 ИЩЕМ ЗАКАЗ: {order_id}")
-        logger.info(f"--- НАЧАЛО ИСТОРИИ ({len(history.operations)} шт) ---")
-        
-        for op in history.operations:
-            # Выводим в консоль каждую операцию для проверки
-            label_info = op.label if op.label else "НЕТ МЕТКИ"
-            logger.info(f"💰 {op.amount}₽ | Label: {label_info} | Status: {op.status}")
-            
-            if op.label == order_id and op.status == "success":
-                if op.amount >= order_data['amount']:
-                    is_paid = True
-                    # Не делаем break, чтобы досмотреть историю в логах до конца (для отладки)
-        
-        logger.info("--- КОНЕЦ ИСТОРИИ ---")
+        history = ym_client.operation_history(label=order_id)
+        is_paid = any(op.status == "success" and op.label == order_id for op in history.operations)
         
         if is_paid:
-            logger.info(f"✅ УСПЕХ! Оплата найдена.")
-            await notify_admin_success(order_id, order_data)
-            del active_orders[order_id]
+            await process_successful_payment(order_id, order_data)
             return web.json_response({'paid': True})
-        else:
-            logger.info(f"❌ Не найдено.")
-            return web.json_response({'paid': False})
+            
+        return web.json_response({'paid': False})
         
     except Exception as e:
-        logger.error(f"CHECK ERROR: {e}")
+        logger.error(f"Check Error: {e}")
         return web.json_response({'paid': False})
 
+# ================= ОБРАБОТКА УВЕДОМЛЕНИЙ ЮМАНИ =================
+
+async def yoomoney_notification(request):
+    """Обработчик уведомлений от ЮМани"""
+    try:
+        data = await request.post()
+        
+        # Проверка подписи
+        notification_type = data.get('notification_type')
+        operation_id = data.get('operation_id')
+        amount = data.get('amount')
+        currency = data.get('currency')
+        datetime_str = data.get('datetime')
+        sender = data.get('sender')
+        codepro = data.get('codepro')
+        label = data.get('label')
+        sha1_hash = data.get('sha1_hash')
+        
+        # Формируем строку для проверки подписи
+        check_str = f"{notification_type}&{operation_id}&{amount}&{currency}&{datetime_str}&{sender}&{codepro}&{YOOMONEY_NOTIFICATION_SECRET}&{label}"
+        calculated_hash = hashlib.sha1(check_str.encode()).hexdigest()
+        
+        # Проверяем подпись
+        if calculated_hash != sha1_hash:
+            logger.warning(f"Invalid hash received from YooMoney: {sha1_hash} vs {calculated_hash}")
+            return web.Response(text="Invalid signature", status=400)
+        
+        # Проверяем тип уведомления и статус операции
+        if notification_type == 'p2p-incoming' and codepro == 'false':
+            order_id = label
+            if order_id in active_orders:
+                order_data = active_orders[order_id]
+                await process_successful_payment(order_id, order_data)
+                logger.info(f"Payment processed automatically via notification: {order_id}")
+            else:
+                logger.warning(f"Payment received for unknown order: {order_id}")
+                
+        return web.Response(text="OK", status=200)
+        
+    except Exception as e:
+        logger.error(f"Error processing YooMoney notification: {e}")
+        return web.Response(text="Error", status=500)
+
+# ================= ОБЩИЕ ФУНКЦИИ =================
+
 bot_app = None 
+
+async def process_successful_payment(order_id, order_data):
+    """Обработка успешного платежа"""
+    if order_data.get('status') == 'paid':
+        return  # Уже обработан
+        
+    # Обновляем статус заказа
+    order_data['status'] = 'paid'
+    
+    # Уведомляем админа и пользователя
+    await notify_admin_success(order_id, order_data)
 
 async def notify_admin_success(order_id, order_data):
     if bot_app:
         msg = (
-            f"💰 **НОВАЯ ОПЛАТА**\n"
+            f"💰 НОВАЯ ОПЛАТА\n"
             f"Сумма: {order_data['amount']}₽\n"
-            f"ID: `{order_id}`\n"
-            f"Товары: {order_data['items_text']}"
+            f"User ID: {order_data['user_id']}\n"
+            f"Товары: {order_data['items_text']}\n"
+            f"ID: {order_id}"
         )
         try:
             await bot_app.bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode='Markdown')
             await bot_app.bot.send_message(chat_id=order_data['user_id'], text="✅ Оплата получена! Ждите выдачи.")
-        except: pass
+        except Exception as e:
+            logger.error(f"Error sending notification: {e}")
 
 # ================= БОТ =================
 
@@ -199,46 +246,36 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("Админ: @slayip")
 
-# ================= ЗАПУСК =================
-
 async def main():
     global bot_app
     
-    # 1. Запуск БОТА
+    # 1. БОТ
     bot_app = Application.builder().token(TOKEN).build()
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CallbackQueryHandler(show_support, pattern='^support$'))
     
     await bot_app.initialize()
     await bot_app.start()
-    
-    await bot_app.updater.start_polling(drop_pending_updates=True)
-    print("🤖 Бот запущен (Polling)...")
+    await bot_app.updater.start_polling()
+    print("🤖 Бот работает...")
 
-    # 2. Запуск WEB SERVER
+    # 2. WEB SERVER
     app = web.Application()
     app.router.add_get('/', http_index)              
     app.router.add_post('/api/create_order', api_create_order) 
     app.router.add_get('/api/check_payment', api_check_payment)
+    app.router.add_post('/api/yoomoney_notification', yoomoney_notification)  # Новый эндпоинт для уведомлений
     
     runner = web.AppRunner(app)
     await runner.setup()
-    
     port = int(os.environ.get("PORT", 3000))
     site = web.TCPSite(runner, '0.0.0.0', port)
-    
-    print(f"🌍 Сайт запущен на порту {port}")
+    print(f"🌍 API запущен на порту {port}")
     await site.start()
 
-    # 3. БЕСКОНЕЧНЫЙ ЦИКЛ
-    print("🚀 Все системы работают.")
-    while True:
-        await asyncio.sleep(3600)
+    stop_event = asyncio.Event()
+    await stop_event.wait()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"CRITICAL ERROR: {e}")
+    try: asyncio.run(main())
+    except KeyboardInterrupt: pass
