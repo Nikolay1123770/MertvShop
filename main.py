@@ -98,6 +98,7 @@ async def api_create_order(request):
         user_id = data.get('user_id')
         cart_items = data.get('cart', {})
         stars_amount = data.get('stars', 0)
+        username = data.get('username', 'Неизвестно')  # Получаем username пользователя
         
         # Вычисляем общую стоимость и формируем описание товаров
         total_price = 0
@@ -127,6 +128,7 @@ async def api_create_order(request):
         # Сохраняем информацию о заказе
         active_orders[order_id] = {
             "user_id": user_id,
+            "username": username,  # Сохраняем username в заказе
             "amount": total_price,
             "items_text": items_text,
             "status": "pending",
@@ -193,7 +195,48 @@ async def api_success_payment(request):
     
     # Редирект на страницу успеха
     return web.Response(
-        body='<html><script>window.close();</script><body>Оплата получена! Вы можете закрыть это окно.</body></html>',
+        body='''
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                    text-align: center;
+                    margin: 50px 20px;
+                    background-color: #000;
+                    color: white;
+                }
+                .success {
+                    color: #4CAF50;
+                    font-size: 64px;
+                    margin-bottom: 20px;
+                }
+                button {
+                    background: linear-gradient(135deg, #a980f5 0%, #7b51d8 100%);
+                    color: white;
+                    border: none;
+                    padding: 15px 30px;
+                    border-radius: 16px;
+                    font-size: 16px;
+                    cursor: pointer;
+                    font-weight: bold;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="success">✅</div>
+            <h1>Оплата получена!</h1>
+            <p>Спасибо за покупку. Ваш заказ будет обработан в ближайшее время.</p>
+            <button onclick="window.close();">Закрыть окно</button>
+            <script>
+                setTimeout(function() {
+                    if (window.opener) window.opener.postMessage({status: "success"}, "*");
+                }, 1000);
+            </script>
+        </body>
+        </html>
+        ''',
         content_type='text/html'
     )
 
@@ -254,11 +297,16 @@ async def notify_payment_success(order_id, order):
     """Отправляет уведомления о успешной оплате"""
     if bot_app:
         try:
+            # Формирование информации о пользователе с username
+            user_info = f"User ID: {order['user_id']}"
+            if order.get('username') and order.get('username') != 'Неизвестно':
+                user_info += f"\nUsername: @{order['username']}"
+            
             # Уведомление администратору
             admin_message = (
                 f"💰 НОВАЯ ОПЛАТА\n"
                 f"Сумма: {order['amount']}₽\n"
-                f"User ID: {order['user_id']}\n"
+                f"{user_info}\n"
                 f"Товары: {order['items_text']}\n"
                 f"ID: {order_id}"
             )
