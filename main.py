@@ -29,10 +29,11 @@ logger = logging.getLogger(__name__)
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"
 ADMIN_ID = 1691654877
-YOOMONEY_TOKEN = "ЮМани-токен"
+YOOMONEY_TOKEN = "86F31496F52C1B607A0D306BE0CAE639CFAFE7A45D3C88AF4E1759B22004954D"
 YOOMONEY_WALLET = "4100118944797800"
 YOOMONEY_NOTIFICATION_SECRET = "fL8QIMDHIeudGlqCPNR7eux/"  # Получить в настройках HTTP-уведомлений
 WEB_APP_URL = "https://mertvshop.bothost.ru" 
+PAYMENT_CHECK_INTERVAL = 10  # Интервал проверки платежей в секундах (для подстраховки)
 
 # ================= ИНИЦИАЛИЗАЦИЯ =================
 try:
@@ -61,18 +62,16 @@ class Product:
         TG_PREMIUM_12: "Premium 12 мес.",
     }
 
-# ================= API ДЛЯ САЙТА (ИСПРАВЛЕН ПУТЬ) =================
+# ================= API ДЛЯ САЙТА =================
 
 async def http_index(request):
     """Отдает HTML файл, вычисляя абсолютный путь"""
-    # Получаем папку, где лежит этот скрипт (main.py)
     base_path = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_path, "index.html")
     
     if os.path.exists(file_path):
         return web.FileResponse(file_path)
     else:
-        # Для отладки: покажем, где мы искали файл
         return web.Response(text=f"Error 404: index.html not found.\nSearched in: {file_path}", status=404)
 
 async def api_create_order(request):
@@ -105,54 +104,84 @@ async def api_create_order(request):
             "user_id": user_id,
             "amount": total_price,
             "items_text": ", ".join(items_list),
-            "status": "pending"
+            "status": "pending",
+            "created_at": asyncio.get_event_loop().time()
         }
 
+        # Создаем платеж с редиректом обратно в приложение
+        success_url = f"{WEB_APP_URL}/success?order_id={order_id}"
         quickpay = Quickpay(
             receiver=YOOMONEY_WALLET,
             quickpay_form="shop",
             targets=f"Order {order_id[:8]}",
             paymentType="SB",
             sum=total_price,
-            label=order_id
+            label=order_id,
+            successURL=success_url
         )
 
         return web.json_response({
             'status': 'ok',
             'order_id': order_id,
             'payment_url': quickpay.base_url,
-            'amount': total_price
+            'amount': total_price,
+            'auto_check': True  # Указываем клиенту, что проверка автоматическая
         })
 
     except Exception as e:
         logger.error(f"API Error: {e}")
-        return web.json_response({'status': 'error'}, status=500)
+        return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
 async def api_check_payment(request):
+    """API для проверки статуса оплаты"""
     order_id = request.query.get('order_id')
-    order_data = active_orders.get(order_id)
-    
-    if not order_data:
+    if not order_id or order_id not in active_orders:
         return web.json_response({'paid': False, 'error': 'Order not found'})
     
-    # Проверяем статус заказа в нашей системе
+    order_data = active_orders[order_id]
+    
+    # Если заказ уже оплачен в нашей системе
     if order_data.get('status') == 'paid':
-        return web.json_response({'paid': True})
+        return web.json_response({'paid': True, 'status': 'completed'})
         
-    # Если не оплачено в системе, проверяем через API
+    # Если заказ еще в обработке, проверяем через API
+    try:
+        is_paid = await check_payment_status(order_id)
+        if is_paid:
+            return web.json_response({'paid': True, 'status': 'completed'})
+        else:
+            return web.json_response({
+                'paid': False, 
+                'status': 'pending',
+                'message': 'Ожидание оплаты. Статус обновляется автоматически.'
+            })
+        
+    except Exception as e:
+        logger.error(f"Payment check error: {e}")
+        return web.json_response({'paid': False, 'error': str(e)})
+
+async def check_payment_status(order_id):
+    """Проверяет статус оплаты через API ЮМани"""
+    if order_id not in active_orders:
+        return False
+        
+    order_data = active_orders[order_id]
+    if order_data.get('status') == 'paid':
+        return True
+        
     try:
         history = ym_client.operation_history(label=order_id)
         is_paid = any(op.status == "success" and op.label == order_id for op in history.operations)
         
         if is_paid:
             await process_successful_payment(order_id, order_data)
-            return web.json_response({'paid': True})
+            return True
             
-        return web.json_response({'paid': False})
+        return False
         
     except Exception as e:
-        logger.error(f"Check Error: {e}")
-        return web.json_response({'paid': False})
+        logger.error(f"YooMoney API Error: {e}")
+        return False
 
 # ================= ОБРАБОТКА УВЕДОМЛЕНИЙ ЮМАНИ =================
 
@@ -160,6 +189,7 @@ async def yoomoney_notification(request):
     """Обработчик уведомлений от ЮМани"""
     try:
         data = await request.post()
+        logger.info(f"YooMoney notification received: {data}")
         
         # Проверка подписи
         notification_type = data.get('notification_type')
@@ -178,7 +208,7 @@ async def yoomoney_notification(request):
         
         # Проверяем подпись
         if calculated_hash != sha1_hash:
-            logger.warning(f"Invalid hash received from YooMoney: {sha1_hash} vs {calculated_hash}")
+            logger.warning(f"Invalid hash from YooMoney: {sha1_hash} vs {calculated_hash}")
             return web.Response(text="Invalid signature", status=400)
         
         # Проверяем тип уведомления и статус операции
@@ -187,15 +217,48 @@ async def yoomoney_notification(request):
             if order_id in active_orders:
                 order_data = active_orders[order_id]
                 await process_successful_payment(order_id, order_data)
-                logger.info(f"Payment processed automatically via notification: {order_id}")
+                logger.info(f"Payment processed via notification: {order_id}")
             else:
-                logger.warning(f"Payment received for unknown order: {order_id}")
+                logger.warning(f"Payment for unknown order: {order_id}")
                 
         return web.Response(text="OK", status=200)
         
     except Exception as e:
         logger.error(f"Error processing YooMoney notification: {e}")
         return web.Response(text="Error", status=500)
+
+# ================= ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ПЛАТЕЖЕЙ =================
+
+async def periodic_payment_check():
+    """Регулярно проверяет активные заказы для подстраховки"""
+    while True:
+        try:
+            current_time = asyncio.get_event_loop().time()
+            orders_to_check = []
+            
+            # Собираем заказы для проверки
+            for order_id, order_data in active_orders.items():
+                if order_data.get('status') != 'paid':
+                    # Проверяем заказы не старше 24 часов
+                    if current_time - order_data.get('created_at', 0) < 86400:
+                        orders_to_check.append(order_id)
+            
+            # Проверяем каждый заказ
+            for order_id in orders_to_check:
+                await check_payment_status(order_id)
+                
+            # Чистим старые заказы (старше 24 часов)
+            for order_id in list(active_orders.keys()):
+                order_data = active_orders[order_id]
+                if current_time - order_data.get('created_at', 0) > 86400:
+                    if order_data.get('status') != 'paid':
+                        logger.info(f"Removing expired order: {order_id}")
+                        del active_orders[order_id]
+            
+        except Exception as e:
+            logger.error(f"Error in periodic payment check: {e}")
+            
+        await asyncio.sleep(PAYMENT_CHECK_INTERVAL)
 
 # ================= ОБЩИЕ ФУНКЦИИ =================
 
@@ -264,7 +327,7 @@ async def main():
     app.router.add_get('/', http_index)              
     app.router.add_post('/api/create_order', api_create_order) 
     app.router.add_get('/api/check_payment', api_check_payment)
-    app.router.add_post('/api/yoomoney_notification', yoomoney_notification)  # Новый эндпоинт для уведомлений
+    app.router.add_post('/api/yoomoney_notification', yoomoney_notification)
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -272,6 +335,11 @@ async def main():
     site = web.TCPSite(runner, '0.0.0.0', port)
     print(f"🌍 API запущен на порту {port}")
     await site.start()
+    
+    # 3. Запускаем фоновую проверку платежей для подстраховки
+    asyncio.create_task(periodic_payment_check())
+    
+    print("💰 Автоматическая система платежей запущена")
 
     stop_event = asyncio.Event()
     await stop_event.wait()
