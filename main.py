@@ -4,9 +4,14 @@ import json
 import asyncio
 import os
 import sys
-import hmac
 import hashlib
-from typing import Dict, List
+import hmac
+import time
+from datetime import datetime
+from typing import Dict, List, Optional
+import aiohttp
+from urllib.parse import urlencode
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
@@ -16,7 +21,6 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-from yoomoney import Client, Quickpay
 from aiohttp import web
 
 # Настройка логирования
@@ -29,19 +33,12 @@ logger = logging.getLogger(__name__)
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "8557420124:AAFuZfN5E1f0-qH-cIBSqI9JK309R6s88Q8"
 ADMIN_ID = 1691654877
-YOOMONEY_TOKEN = "86F31496F52C1B607A0D306BE0CAE639CFAFE7A45D3C88AF4E1759B22004954D"
 YOOMONEY_WALLET = "4100118944797800"
-YOOMONEY_NOTIFICATION_SECRET = "fL8QIMDHIeudGlqCPNR7eux/"  # Получить в настройках HTTP-уведомлений
-WEB_APP_URL = "https://mertvshop.bothost.ru" 
-PAYMENT_CHECK_INTERVAL = 10  # Интервал проверки платежей в секундах (для подстраховки)
+YOOMONEY_NOTIFICATION_SECRET = "fL8QIMDHIeudGlqCPNR7eux/"
+WEB_APP_URL = "https://mertvshop.bothost.ru"
 
-# ================= ИНИЦИАЛИЗАЦИЯ =================
-try:
-    ym_client = Client(YOOMONEY_TOKEN)
-except Exception as e:
-    logger.error(f"Error YM: {e}")
-
-active_orders: Dict[str, Dict] = {}
+# ================= ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ =================
+active_orders = {}
 
 class Product:
     STARS = "stars"
@@ -62,10 +59,30 @@ class Product:
         TG_PREMIUM_12: "Premium 12 мес.",
     }
 
+# ================= ФУНКЦИИ ПЛАТЕЖЕЙ =================
+
+def generate_yoomoney_url(order_id, amount, description):
+    """
+    Генерирует URL для оплаты через ЮМани без использования библиотеки
+    """
+    base_url = "https://yoomoney.ru/quickpay/confirm.xml"
+    
+    params = {
+        "receiver": YOOMONEY_WALLET,
+        "quickpay-form": "shop",
+        "targets": description,
+        "paymentType": "SB",
+        "sum": amount,
+        "label": order_id,
+        "successURL": f"{WEB_APP_URL}/success?order_id={order_id}"
+    }
+    
+    return f"{base_url}?{urlencode(params)}"
+
 # ================= API ДЛЯ САЙТА =================
 
 async def http_index(request):
-    """Отдает HTML файл, вычисляя абсолютный путь"""
+    """Отдает HTML файл"""
     base_path = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_path, "index.html")
     
@@ -82,6 +99,7 @@ async def api_create_order(request):
         cart_items = data.get('cart', {})
         stars_amount = data.get('stars', 0)
         
+        # Вычисляем общую стоимость и формируем описание товаров
         total_price = 0
         items_list = []
 
@@ -97,35 +115,37 @@ async def api_create_order(request):
             items_list.append(f"Stars ⭐️ x{stars_amount}")
 
         if total_price <= 0:
-            return web.json_response({'status': 'error', 'message': 'Empty cart'})
+            return web.json_response({'status': 'error', 'message': 'Пустая корзина'})
 
+        # Создаем уникальный ID заказа
         order_id = str(uuid.uuid4())
+        
+        # Формируем описание для платежа
+        description = f"Order {order_id[:8]}"
+        items_text = ", ".join(items_list)
+        
+        # Сохраняем информацию о заказе
         active_orders[order_id] = {
             "user_id": user_id,
             "amount": total_price,
-            "items_text": ", ".join(items_list),
+            "items_text": items_text,
             "status": "pending",
-            "created_at": asyncio.get_event_loop().time()
+            "created_at": time.time()
         }
-
-        # Создаем платеж с редиректом обратно в приложение
-        success_url = f"{WEB_APP_URL}/success?order_id={order_id}"
-        quickpay = Quickpay(
-            receiver=YOOMONEY_WALLET,
-            quickpay_form="shop",
-            targets=f"Order {order_id[:8]}",
-            paymentType="SB",
-            sum=total_price,
-            label=order_id,
-            successURL=success_url
+        
+        # Генерируем платежную ссылку
+        payment_url = generate_yoomoney_url(
+            order_id=order_id,
+            amount=total_price,
+            description=description
         )
-
+        
         return web.json_response({
             'status': 'ok',
             'order_id': order_id,
-            'payment_url': quickpay.base_url,
+            'payment_url': payment_url,
             'amount': total_price,
-            'auto_check': True  # Указываем клиенту, что проверка автоматическая
+            'auto_check': True
         })
 
     except Exception as e:
@@ -133,65 +153,57 @@ async def api_create_order(request):
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
 
 async def api_check_payment(request):
-    """API для проверки статуса оплаты"""
+    """Проверяет статус оплаты заказа"""
     order_id = request.query.get('order_id')
+    
     if not order_id or order_id not in active_orders:
-        return web.json_response({'paid': False, 'error': 'Order not found'})
+        return web.json_response({
+            'paid': False, 
+            'error': 'Заказ не найден'
+        })
     
-    order_data = active_orders[order_id]
+    order = active_orders.get(order_id)
     
-    # Если заказ уже оплачен в нашей системе
-    if order_data.get('status') == 'paid':
-        return web.json_response({'paid': True, 'status': 'completed'})
-        
-    # Если заказ еще в обработке, проверяем через API
-    try:
-        is_paid = await check_payment_status(order_id)
-        if is_paid:
-            return web.json_response({'paid': True, 'status': 'completed'})
-        else:
-            return web.json_response({
-                'paid': False, 
-                'status': 'pending',
-                'message': 'Ожидание оплаты. Статус обновляется автоматически.'
-            })
-        
-    except Exception as e:
-        logger.error(f"Payment check error: {e}")
-        return web.json_response({'paid': False, 'error': str(e)})
+    if order.get('status') == 'paid':
+        return web.json_response({
+            'paid': True,
+            'status': 'completed'
+        })
+    
+    return web.json_response({
+        'paid': False,
+        'status': 'pending',
+        'message': 'Ожидание подтверждения оплаты'
+    })
 
-async def check_payment_status(order_id):
-    """Проверяет статус оплаты через API ЮМани"""
-    if order_id not in active_orders:
-        return False
-        
-    order_data = active_orders[order_id]
-    if order_data.get('status') == 'paid':
-        return True
-        
-    try:
-        history = ym_client.operation_history(label=order_id)
-        is_paid = any(op.status == "success" and op.label == order_id for op in history.operations)
-        
-        if is_paid:
-            await process_successful_payment(order_id, order_data)
-            return True
-            
-        return False
-        
-    except Exception as e:
-        logger.error(f"YooMoney API Error: {e}")
-        return False
-
-# ================= ОБРАБОТКА УВЕДОМЛЕНИЙ ЮМАНИ =================
+async def api_success_payment(request):
+    """Обрабатывает возврат после успешной оплаты"""
+    order_id = request.query.get('order_id')
+    
+    if not order_id or order_id not in active_orders:
+        return web.Response(text="Заказ не найден", status=404)
+    
+    order = active_orders.get(order_id)
+    
+    # Если заказ еще не отмечен как оплаченный, обрабатываем его
+    if order.get('status') != 'paid':
+        order['status'] = 'paid'
+        # Отправляем уведомления
+        asyncio.create_task(notify_payment_success(order_id, order))
+    
+    # Редирект на страницу успеха
+    return web.Response(
+        body='<html><script>window.close();</script><body>Оплата получена! Вы можете закрыть это окно.</body></html>',
+        content_type='text/html'
+    )
 
 async def yoomoney_notification(request):
-    """Обработчик уведомлений от ЮМани"""
+    """Обрабатывает уведомления от ЮМани"""
     try:
         data = await request.post()
-        logger.info(f"YooMoney notification received: {data}")
+        logger.info(f"Получено уведомление от ЮМани: {data}")
         
-        # Проверка подписи
+        # Получение параметров
         notification_type = data.get('notification_type')
         operation_id = data.get('operation_id')
         amount = data.get('amount')
@@ -208,87 +220,84 @@ async def yoomoney_notification(request):
         
         # Проверяем подпись
         if calculated_hash != sha1_hash:
-            logger.warning(f"Invalid hash from YooMoney: {sha1_hash} vs {calculated_hash}")
-            return web.Response(text="Invalid signature", status=400)
+            logger.warning(f"Недействительная подпись от ЮМани: {sha1_hash}")
+            return web.Response(text="Неверная подпись", status=400)
         
-        # Проверяем тип уведомления и статус операции
+        # Проверяем тип уведомления
         if notification_type == 'p2p-incoming' and codepro == 'false':
             order_id = label
+            
+            # Проверяем наличие заказа
             if order_id in active_orders:
-                order_data = active_orders[order_id]
-                await process_successful_payment(order_id, order_data)
-                logger.info(f"Payment processed via notification: {order_id}")
-            else:
-                logger.warning(f"Payment for unknown order: {order_id}")
+                order = active_orders[order_id]
                 
-        return web.Response(text="OK", status=200)
+                # Проверяем статус заказа
+                if order.get('status') != 'paid':
+                    order['status'] = 'paid'
+                    # Отправляем уведомления
+                    asyncio.create_task(notify_payment_success(order_id, order))
+                    logger.info(f"Платеж подтвержден через уведомление: {order_id}")
+            else:
+                logger.warning(f"Получен платеж для неизвестного заказа: {order_id}")
+        
+        return web.Response(text="OK")
         
     except Exception as e:
-        logger.error(f"Error processing YooMoney notification: {e}")
-        return web.Response(text="Error", status=500)
+        logger.error(f"Ошибка обработки уведомления ЮМани: {e}")
+        return web.Response(text="Ошибка", status=500)
 
-# ================= ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ПЛАТЕЖЕЙ =================
+# ================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================
 
-async def periodic_payment_check():
-    """Регулярно проверяет активные заказы для подстраховки"""
+bot_app = None
+
+async def notify_payment_success(order_id, order):
+    """Отправляет уведомления о успешной оплате"""
+    if bot_app:
+        try:
+            # Уведомление администратору
+            admin_message = (
+                f"💰 НОВАЯ ОПЛАТА\n"
+                f"Сумма: {order['amount']}₽\n"
+                f"User ID: {order['user_id']}\n"
+                f"Товары: {order['items_text']}\n"
+                f"ID: {order_id}"
+            )
+            
+            await bot_app.bot.send_message(
+                chat_id=ADMIN_ID, 
+                text=admin_message
+            )
+            
+            # Уведомление пользователю
+            user_message = "✅ Оплата успешно получена! Спасибо за покупку. Ваш заказ будет обработан в ближайшее время."
+            
+            await bot_app.bot.send_message(
+                chat_id=order['user_id'],
+                text=user_message
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка отправки уведомления: {e}")
+
+async def cleanup_old_orders():
+    """Периодическая очистка старых заказов (раз в час)"""
     while True:
         try:
-            current_time = asyncio.get_event_loop().time()
-            orders_to_check = []
+            current_time = time.time()
             
-            # Собираем заказы для проверки
-            for order_id, order_data in active_orders.items():
-                if order_data.get('status') != 'paid':
-                    # Проверяем заказы не старше 24 часов
-                    if current_time - order_data.get('created_at', 0) < 86400:
-                        orders_to_check.append(order_id)
-            
-            # Проверяем каждый заказ
-            for order_id in orders_to_check:
-                await check_payment_status(order_id)
-                
-            # Чистим старые заказы (старше 24 часов)
+            # Удаляем заказы старше 24 часов
             for order_id in list(active_orders.keys()):
-                order_data = active_orders[order_id]
-                if current_time - order_data.get('created_at', 0) > 86400:
-                    if order_data.get('status') != 'paid':
-                        logger.info(f"Removing expired order: {order_id}")
+                order = active_orders[order_id]
+                if current_time - order.get('created_at', 0) > 86400:
+                    if order.get('status') != 'paid':
+                        logger.info(f"Удаление устаревшего заказа: {order_id}")
                         del active_orders[order_id]
-            
-        except Exception as e:
-            logger.error(f"Error in periodic payment check: {e}")
-            
-        await asyncio.sleep(PAYMENT_CHECK_INTERVAL)
-
-# ================= ОБЩИЕ ФУНКЦИИ =================
-
-bot_app = None 
-
-async def process_successful_payment(order_id, order_data):
-    """Обработка успешного платежа"""
-    if order_data.get('status') == 'paid':
-        return  # Уже обработан
         
-    # Обновляем статус заказа
-    order_data['status'] = 'paid'
-    
-    # Уведомляем админа и пользователя
-    await notify_admin_success(order_id, order_data)
-
-async def notify_admin_success(order_id, order_data):
-    if bot_app:
-        msg = (
-            f"💰 НОВАЯ ОПЛАТА\n"
-            f"Сумма: {order_data['amount']}₽\n"
-            f"User ID: {order_data['user_id']}\n"
-            f"Товары: {order_data['items_text']}\n"
-            f"ID: {order_id}"
-        )
-        try:
-            await bot_app.bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode='Markdown')
-            await bot_app.bot.send_message(chat_id=order_data['user_id'], text="✅ Оплата получена! Ждите выдачи.")
         except Exception as e:
-            logger.error(f"Error sending notification: {e}")
+            logger.error(f"Ошибка при очистке старых заказов: {e}")
+        
+        # Запускаем каждый час
+        await asyncio.sleep(3600)
 
 # ================= БОТ =================
 
@@ -309,10 +318,12 @@ async def show_support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.message.reply_text("Админ: @slayip")
 
+# ================= ОСНОВНАЯ ФУНКЦИЯ =================
+
 async def main():
     global bot_app
     
-    # 1. БОТ
+    # 1. Запускаем бота
     bot_app = Application.builder().token(TOKEN).build()
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CallbackQueryHandler(show_support, pattern='^support$'))
@@ -322,28 +333,31 @@ async def main():
     await bot_app.updater.start_polling()
     print("🤖 Бот работает...")
 
-    # 2. WEB SERVER
+    # 2. Запускаем веб-сервер для API
     app = web.Application()
     app.router.add_get('/', http_index)              
-    app.router.add_post('/api/create_order', api_create_order) 
+    app.router.add_post('/api/create_order', api_create_order)
     app.router.add_get('/api/check_payment', api_check_payment)
     app.router.add_post('/api/yoomoney_notification', yoomoney_notification)
+    app.router.add_get('/success', api_success_payment)  # Обработка успешного платежа
     
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 3000))
     site = web.TCPSite(runner, '0.0.0.0', port)
-    print(f"🌍 API запущен на порту {port}")
     await site.start()
+    print(f"🌍 API запущен на порту {port}")
     
-    # 3. Запускаем фоновую проверку платежей для подстраховки
-    asyncio.create_task(periodic_payment_check())
-    
-    print("💰 Автоматическая система платежей запущена")
+    # 3. Запускаем фоновую задачу очистки старых заказов
+    asyncio.create_task(cleanup_old_orders())
+    print("💰 Система платежей запущена")
 
+    # 4. Ждем остановки
     stop_event = asyncio.Event()
     await stop_event.wait()
 
 if __name__ == '__main__':
-    try: asyncio.run(main())
-    except KeyboardInterrupt: pass
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
