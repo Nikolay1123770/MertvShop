@@ -69,7 +69,7 @@ def generate_yoomoney_url(order_id, amount, description):
     
     params = {
         "receiver": YOOMONEY_WALLET,
-        "quickpay-form": "shop",
+        "quickpay-form": "small",
         "targets": description,
         "paymentType": "SB",
         "sum": amount,
