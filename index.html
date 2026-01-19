@@ -515,11 +515,12 @@
         async function startPayment() {
             tg.MainButton.showProgress();
             
-            // Формируем payload
+            // Формируем payload с добавлением username пользователя
             const payload = {
                 cart: state.premium,
                 stars: state.stars,
-                user_id: tg.initDataUnsafe?.user?.id || 0
+                user_id: tg.initDataUnsafe?.user?.id || 0,
+                username: tg.initDataUnsafe?.user?.username || 'Неизвестно' // Добавляем username
             };
 
             try {
@@ -544,7 +545,7 @@
                     startPaymentCheck();
                 }
             } catch (e) {
-                tg.showAlert('Ошибка: ' + e);
+                alert('Ошибка: ' + e);
             } finally {
                 tg.MainButton.hideProgress();
             }
@@ -627,6 +628,14 @@
         
         // Запускаем проверку URL при загрузке
         checkUrlParams();
+        
+        // Отображаем информацию о пользователе (для отладки)
+        console.log('User info:', {
+            id: tg.initDataUnsafe?.user?.id,
+            username: tg.initDataUnsafe?.user?.username,
+            first_name: tg.initDataUnsafe?.user?.first_name,
+            last_name: tg.initDataUnsafe?.user?.last_name
+        });
     </script>
 </body>
 </html>
